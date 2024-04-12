@@ -97,6 +97,7 @@ class AwsS3V3Adapter implements FilesystemAdapter, PublicUrlGenerator, ChecksumP
     private PathPrefixer $prefixer;
     private VisibilityConverter $visibility;
     private MimeTypeDetector $mimeTypeDetector;
+    private bool $typeFromContent = false;
 
     public function __construct(
         private S3ClientInterface $client,
@@ -113,6 +114,11 @@ class AwsS3V3Adapter implements FilesystemAdapter, PublicUrlGenerator, ChecksumP
         $this->prefixer = new PathPrefixer($prefix);
         $this->visibility = $visibility ?? new PortableVisibilityConverter();
         $this->mimeTypeDetector = $mimeTypeDetector ?? new FinfoMimeTypeDetector();
+
+        if (isset($this->options['type_from_content'])) {
+            $this->typeFromContent = $this->options['type_from_content'];
+            unset($this->options['type_from_content']);
+        }
     }
 
     public function fileExists(string $path): bool
@@ -310,6 +316,10 @@ class AwsS3V3Adapter implements FilesystemAdapter, PublicUrlGenerator, ChecksumP
             return new DirectoryAttributes(rtrim($path, '/'));
         }
 
+        if ($this->typeFromContent) {
+            $metadata['ContentType'] = $this->getTypeFromContent($path);
+        }
+
         $mimetype = $metadata['ContentType'] ?? null;
         $fileSize = $metadata['ContentLength'] ?? $metadata['Size'] ?? null;
         $fileSize = $fileSize === null ? null : (int) $fileSize;
@@ -324,6 +334,11 @@ class AwsS3V3Adapter implements FilesystemAdapter, PublicUrlGenerator, ChecksumP
             $mimetype,
             $this->extractExtraMetadata($metadata)
         );
+    }
+
+    private function getTypeFromContent(string $path): ?string
+    {
+        return $this->mimeTypeDetector->detectMimeTypeFromBuffer(fread($this->readStream($path), 1024));
     }
 
     private function extractExtraMetadata(array $metadata): array
